@@ -29,24 +29,28 @@ const downloadFile = (content, filename, type = 'text/plain') => {
 
 // API Call helper
 const generateWithGemini = async (prompt, imageParts) => {
-  const apiKey = ""; // Canvas runtime provides the key automatically when empty
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+const apiKey = String(import.meta.env.VITE_GEMINI_API_KEY).trim();
+const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
 
-  const payload = {
-    contents: [{
-      role: 'user',
-      parts: [
-        { text: prompt },
-        ...imageParts
-      ]
-    }]
-  };
+const payload = {
+  contents: [{
+    role: 'user',
+    parts: [
+      { text: prompt },
+      ...imageParts
+    ]
+  }]
+};
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+const response = await fetch(apiUrl, {
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    // 2. PINDAHKAN API KEY KE SINI
+    'x-goog-api-key': apiKey 
+  },
+  body: JSON.stringify(payload)
+});
 
   if (!response.ok) {
     throw new Error(`API Error: ${response.statusText}`);
