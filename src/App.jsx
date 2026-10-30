@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, Image as ImageIcon, Video, Copy, Download, 
-  Check, Loader2, FileText, Code, Play, RefreshCw
+  Check, Loader2, FileText, Code, Play, RefreshCw, Plus
 } from 'lucide-react';
 
 // --- UTILITIES ---
@@ -46,7 +46,6 @@ const response = await fetch(apiUrl, {
   method: 'POST',
   headers: { 
     'Content-Type': 'application/json',
-    // 2. PINDAHKAN API KEY KE SINI
     'x-goog-api-key': apiKey 
   },
   body: JSON.stringify(payload)
@@ -70,7 +69,6 @@ const parseResponse = (text) => {
   let englishText = englishMatch ? englishMatch[1].trim() : 'Could not parse English prompt. See raw output below if applicable.';
   let jsonText = jsonMatch ? jsonMatch[1].trim() : '{\n  "error": "Could not parse JSON output."\n}';
 
-  // Strip markdown blocks if the LLM added them despite instructions
   jsonText = jsonText.replace(/^```(json)?/im, '').replace(/```$/im, '').trim();
 
   return { englishText, jsonText };
@@ -112,7 +110,6 @@ const ResultViewer = ({ englishText, jsonText }) => {
     <div className="w-full space-y-6 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* English Prompts Section */}
         <div className="bg-gray-900/40 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm flex flex-col">
           <div className="flex justify-between items-center px-4 py-3 bg-gray-800/50 border-b border-gray-700/50">
             <h3 className="font-semibold text-gray-200 flex items-center gap-2">
@@ -134,7 +131,6 @@ const ResultViewer = ({ englishText, jsonText }) => {
           </div>
         </div>
 
-        {/* JSON Section */}
         <div className="bg-gray-900/40 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm flex flex-col">
           <div className="flex justify-between items-center px-4 py-3 bg-gray-800/50 border-b border-gray-700/50">
             <h3 className="font-semibold text-gray-200 flex items-center gap-2">
@@ -161,29 +157,39 @@ const ResultViewer = ({ englishText, jsonText }) => {
 };
 
 const ImageToPrompt = ({ showToast }) => {
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [customInstruction, setCustomInstruction] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
-  const fileInputRef = useRef(null);
+  
+  // Dua referensi terpisah untuk mengganti atau menambah gambar
+  const replaceInputRef = useRef(null);
+  const addInputRef = useRef(null);
 
-  const aspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9'];
+  const aspectRatios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9', 'Desktop', 'Mobile'];
 
-  const handleFileSelect = (e) => {
-    const selected = e.target.files[0];
-    if (selected && selected.type.startsWith('image/')) {
-      setFile(selected);
-      setPreview(URL.createObjectURL(selected));
+  const handleFileSelect = (e, isReplace = true) => {
+    const selectedFiles = Array.from(e.target.files).filter(file => file.type.startsWith('image/'));
+    
+    if (selectedFiles.length > 0) {
+      if (isReplace) {
+        setFiles(selectedFiles);
+        previews.forEach(url => URL.revokeObjectURL(url));
+        setPreviews(selectedFiles.map(file => URL.createObjectURL(file)));
+      } else {
+        setFiles(prev => [...prev, ...selectedFiles]);
+        setPreviews(prev => [...prev, ...selectedFiles.map(file => URL.createObjectURL(file))]);
+      }
       setResults(null);
-    } else {
-      showToast('Please select a valid image file.', 'error');
     }
+    e.target.value = null; // Reset input agar bisa milih file yang sama lagi
   };
 
   const handleGenerate = async () => {
-    if (!file) {
-      showToast('Please upload an image first.', 'error');
+    if (files.length === 0) {
+      showToast('Please upload at least one image.', 'error');
       return;
     }
 
@@ -191,42 +197,55 @@ const ImageToPrompt = ({ showToast }) => {
     setResults(null);
 
     try {
-      const base64Data = await fileToBase64(file);
+      const base64Promises = files.map(file => fileToBase64(file));
+      const base64DataArray = await Promise.all(base64Promises);
       
+      const userInstructionContext = customInstruction.trim() 
+        ? `\nUSER SPECIFIC INSTRUCTION:\n"${customInstruction}"\nPlease highly prioritize and incorporate this instruction into your generated prompt and analysis.\n` 
+        : '';
+
+      // Prompt telah dirombak TOTAL untuk fokus pada UI/UX Website & Aplikasi
       const systemInstruction = `
-You are an expert AI Prompt Engineer and visual analyst. 
-Perform a deep visual analysis of the provided image.
+You are an expert UI/UX Analyst and AI Prompt Engineer. 
+Your primary goal is to reverse-engineer the provided website or application interface image(s) into a highly detailed prompt that can be used to generate or recreate this exact UI/UX design.
+
+Focus intensely on:
+- Layout structure (headers, sidebars, grids, spacing, card placements).
+- Color palettes (primary, secondary, background, text colors, gradients).
+- Typography styles (sans-serif, serif, visual hierarchy, font weights).
+- UI components (buttons, inputs, icons, navigation bars, modals).
+- Overall design style (minimalist, neumorphism, dark mode, corporate, playful, etc.).
 
 Rules:
-- Never leave fields empty. If uncertain, infer logically but keep realistic.
-- The aspect ratio chosen by the user is ${aspectRatio}. Incorporate this nicely into the prompt.
+- Never leave fields empty. If uncertain, infer logically based on standard UI/UX patterns.
+- The layout target aspect ratio chosen by the user is ${aspectRatio}. Incorporate this into the structure.
 - Your output must follow the STRICT FORMAT below. Do not deviate.
 - Do not use markdown backticks (\`\`\`) around the JSON. Just output raw JSON.
+${userInstructionContext}
 
 STRICT FORMAT:
 ---ENGLISH PROMPT---
-[A fully detailed professional paragraph optimized for AI image models such as Midjourney, DALL-E, Stable Diffusion. Minimum 80 words. No extra commentary.]
+[A fully detailed professional paragraph optimized for AI image models (like Midjourney or DALL-E) to generate a UI/UX mockup. Detail the layout, colors, and components. Minimum 80 words. No extra commentary.]
 ---JSON OUTPUT---
 {
-"main_subject": "string",
-"secondary_elements": "string",
-"environment": "string",
-"lighting": "string",
-"camera_angle": "string",
-"depth_of_field": "string",
-"texture_details": "string",
-"mood": "string",
-"color_grading": "string",
-"style_reference": "string",
-"full_prompt": "Complete optimized image generation prompt, minimum 80 words.",
-"quality_tags": "8K, ultra-detailed, hyperrealistic, professional lighting, sharp focus"
+"ui_style": "string (e.g., Modern Dark Mode Admin Dashboard)",
+"color_palette": "string (e.g., Deep navy background, neon green accents, white text)",
+"layout_structure": "string",
+"typography": "string",
+"key_components": "string",
+"mood_and_theme": "string",
+"full_prompt": "Complete optimized UI/UX image generation prompt, minimum 80 words.",
+"quality_tags": "UI/UX, web design, app interface, Dribbble style, Behance top, high resolution, clean UI"
 }`;
 
-      const imageParts = [{ inlineData: { mimeType: file.type, data: base64Data } }];
+      const imageParts = base64DataArray.map((base64Data, idx) => ({
+        inlineData: { mimeType: files[idx].type, data: base64Data }
+      }));
+      
       const rawText = await generateWithGemini(systemInstruction, imageParts);
       
       setResults(parseResponse(rawText));
-      showToast('Analysis complete!', 'success');
+      showToast('UI/UX Analysis complete!', 'success');
     } catch (err) {
       console.error(err);
       showToast(err.message || 'Failed to generate prompt.', 'error');
@@ -245,25 +264,43 @@ STRICT FORMAT:
           {/* Upload Section */}
           <div className="flex flex-col gap-4">
             <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-              <ImageIcon className="text-purple-400" /> Image Upload
+              <ImageIcon className="text-purple-400" /> UI/UX References
             </h2>
             <div 
-              className={`border-2 border-dashed rounded-2xl h-64 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${preview ? 'border-gray-600 bg-gray-800/30' : 'border-gray-600 hover:border-purple-400 bg-gray-800/30 hover:bg-gray-800/50'}`}
-              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-2xl h-64 flex flex-col items-center justify-center transition-all duration-300 relative overflow-hidden group ${previews.length > 0 ? 'border-gray-600 bg-gray-800/30' : 'cursor-pointer border-gray-600 hover:border-purple-400 bg-gray-800/30 hover:bg-gray-800/50'}`}
+              onClick={() => previews.length === 0 && replaceInputRef.current?.click()}
             >
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
-              {preview ? (
+              <input type="file" ref={replaceInputRef} className="hidden" accept="image/*" multiple onChange={(e) => handleFileSelect(e, true)} />
+              <input type="file" ref={addInputRef} className="hidden" accept="image/*" multiple onChange={(e) => handleFileSelect(e, false)} />
+              
+              {previews.length > 0 ? (
                 <>
-                  <img src={preview} alt="Preview" className="absolute inset-0 w-full h-full object-contain p-2" />
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-white font-medium flex items-center gap-2"><RefreshCw size={16}/> Change Image</span>
+                  <div className="w-full h-full p-2 grid grid-cols-2 gap-2 overflow-y-auto content-start">
+                    {previews.map((preview, index) => (
+                      <img key={index} src={preview} alt={`Preview ${index}`} className="w-full h-28 object-top object-cover rounded-lg border border-gray-700 shadow-sm" />
+                    ))}
+                  </div>
+                  {/* Overlay Menu for 2 Buttons */}
+                  <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 z-20 pointer-events-auto">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); replaceInputRef.current?.click(); }}
+                      className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-4 py-2 rounded-xl font-medium transition-transform hover:scale-105"
+                    >
+                      <RefreshCw size={16}/> Change All
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); addInputRef.current?.click(); }}
+                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 border border-purple-400 text-white px-4 py-2 rounded-xl font-medium transition-transform hover:scale-105"
+                    >
+                      <Plus size={16}/> Add Image
+                    </button>
                   </div>
                 </>
               ) : (
                 <div className="text-center text-gray-400 p-6">
                   <Upload className="mx-auto mb-3 w-10 h-10 text-gray-500 group-hover:text-purple-400 transition-colors" />
-                  <p className="font-medium text-gray-300">Click to browse or drag image here</p>
-                  <p className="text-xs mt-2 text-gray-500">Supports JPG, PNG, WEBP</p>
+                  <p className="font-medium text-gray-300">Click to browse or drag UI screenshots here</p>
+                  <p className="text-xs mt-2 text-gray-500">Supports multiple JPG, PNG, WEBP</p>
                 </div>
               )}
             </div>
@@ -271,11 +308,11 @@ STRICT FORMAT:
 
           {/* Settings Section */}
           <div className="flex flex-col justify-between">
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-4">
               <div>
                 <h2 className="text-xl font-semibold text-white mb-4">Settings</h2>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Target Aspect Ratio</label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="block text-sm font-medium text-gray-400 mb-2">Target Layout / Aspect Ratio</label>
+                <div className="grid grid-cols-4 gap-2">
                   {aspectRatios.map(ratio => (
                     <button
                       key={ratio}
@@ -292,22 +329,30 @@ STRICT FORMAT:
                 </div>
               </div>
 
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-200/80 leading-relaxed">
-                <p>The AI will perform a deep visual analysis of the image, inferring lighting, mood, camera angles, and textures to generate a production-ready prompt.</p>
+              {/* Custom Instruction Box */}
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">Focus Instruction (Optional)</label>
+                <textarea
+                  value={customInstruction}
+                  onChange={(e) => setCustomInstruction(e.target.value)}
+                  placeholder="E.g., Fokus ke desain navbar dan sidebar-nya saja, ubah temanya menjadi dark mode hijau neon..."
+                  className="w-full h-20 bg-gray-800/50 border border-gray-700 rounded-xl p-3 text-sm text-gray-200 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none transition-colors"
+                />
               </div>
+
             </div>
 
             <button 
               onClick={handleGenerate} 
-              disabled={loading || !file}
-              className={`mt-6 w-full py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.3)] hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] ${
-                loading || !file 
+              disabled={loading || files.length === 0}
+              className={`mt-4 w-full py-4 rounded-xl font-bold text-lg flex justify-center items-center gap-2 transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.3)] hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] ${
+                loading || files.length === 0 
                 ? 'bg-gray-700 text-gray-400 cursor-not-allowed shadow-none' 
                 : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:scale-[1.02]'
               }`}
             >
               {loading ? (
-                <><Loader2 className="animate-spin" /> Analyzing Image...</>
+                <><Loader2 className="animate-spin" /> Analyzing Prompt...</>
               ) : (
                 <><ImageIcon /> Generate Prompt</>
               )}
@@ -355,7 +400,6 @@ const VideoToPrompt = ({ showToast }) => {
       let frames = [];
       
       try {
-        // Wait for metadata
         await new Promise(res => {
           if (video.readyState >= 1) res();
           else video.onloadedmetadata = res;
@@ -365,7 +409,6 @@ const VideoToPrompt = ({ showToast }) => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         
-        // Cap max frames to prevent payload explosion (max ~15 frames = 2 minutes of 8s intervals)
         const maxDurationToProcess = Math.min(duration, 120); 
         const interval = 8;
         
@@ -412,52 +455,35 @@ const VideoToPrompt = ({ showToast }) => {
       setProgressMsg(`Analyzing ${frames.length} segments with AI...`);
 
       const systemInstruction = `
-You are a master cinematographer and AI prompt engineer.
-I am providing you with ${frames.length} keyframes extracted from a video (one every 8 seconds, total duration ${duration.toFixed(1)}s).
+You are an expert Full-Stack Developer and UI/UX Analyst. 
+Your primary goal is to reverse-engineer the provided website or application interface image(s) into a highly detailed development brief. 
+You must analyze the visual Frontend (UI/UX) AND logically infer the required Backend architecture, database schema, and APIs needed to make this application functional.
 
-Analyze EACH segment independently but maintain cinematic continuity across the sequence. 
+Focus intensely on:
+- Frontend (UI/UX): Layout structure, components, color palettes, typography, and state management needs.
+- Backend & Architecture: Inferred database schema (tables/collections), necessary API endpoints (REST/GraphQL), authentication needs, and core business logic.
 
 Rules:
-- Never leave fields empty.
-- Ensure 'time_range' accurately reflects the 8-second intervals (e.g., 0-8, 8-16, 16-24).
-- Your output must strictly follow the format below.
+- Never leave fields empty. Infer logically based on standard software engineering patterns.
+- The layout target aspect ratio chosen by the user is ${aspectRatio}. Incorporate this into the frontend structure.
+- Your output must follow the STRICT FORMAT below. Do not deviate.
 - Do not use markdown backticks (\`\`\`) around the JSON. Just output raw JSON.
+${userInstructionContext}
 
 STRICT FORMAT:
----ENGLISH PROMPTS---
-Segment 1 (0-8s):
-[Minimum 80-word cinematic paragraph.]
-Segment 2 (8-16s):
-[Minimum 80-word cinematic paragraph.]
-(Continue for all segments)
-
+---ENGLISH PROMPT---
+[A fully detailed professional brief for a Full-Stack Developer to recreate this app. Detail both the frontend UI/UX design and the underlying backend architecture needed. Minimum 100 words. No extra commentary.]
 ---JSON OUTPUT---
 {
-"total_duration_seconds": ${duration.toFixed(1)},
-"segment_length_seconds": 8,
-"segments": [
-{
-"segment_number": 1,
-"time_range": "0-8",
-"main_subject": "string",
-"action_progression": "string",
-"secondary_elements": "string",
-"environment_details": "string",
-"lighting": "string",
-"camera_angle": "string",
-"camera_movement": "string",
-"depth_of_field": "string",
-"visual_texture": "string",
-"cinematic_style": "string",
-"emotional_tone": "string",
-"color_grading": "string",
-"full_prompt": "Standalone cinematic prompt minimum 80 words optimized for AI video models.",
-"quality_tags": "4K, ultra-detailed, cinematic lighting, dynamic motion, professional color grading"
-}
-]
+"app_type": "string (e.g., E-commerce platform, Admin Dashboard)",
+"frontend_ui_ux": "string (layout structure, color scheme, typography, key UI components)",
+"backend_logic": "string (core processing, authentication, file storage needs)",
+"database_schema_inference": "string (suggested tables/models, e.g., Users, Transactions, Products)",
+"api_endpoints": "string (suggested API routes, e.g., GET /api/users, POST /api/login)",
+"suggested_tech_stack": "string (e.g., React, Tailwind, Node.js, Express, PostgreSQL)",
+"full_prompt": "Complete optimized prompt for full-stack generation (frontend + backend), minimum 100 words."
 }`;
 
-      // Construct parts with timestamps for clarity to the model
       const imageParts = frames.reduce((acc, frame) => {
         acc.push({ text: `Keyframe at ${frame.time} seconds:` });
         acc.push({ inlineData: { mimeType: 'image/jpeg', data: frame.data } });
@@ -480,7 +506,6 @@ Segment 2 (8-16s):
 
   return (
     <div className="flex flex-col items-center w-full max-w-5xl mx-auto">
-      {/* Hidden elements for processing */}
       {videoUrl && <video ref={videoRef} src={videoUrl} className="hidden" muted playsInline crossOrigin="anonymous" />}
       <canvas ref={canvasRef} className="hidden" />
 
@@ -489,7 +514,6 @@ Segment 2 (8-16s):
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
           
-          {/* Upload Section */}
           <div className="flex flex-col gap-4">
             <h2 className="text-xl font-semibold text-white flex items-center gap-2">
               <Video className="text-blue-400" /> Video Upload
@@ -521,7 +545,6 @@ Segment 2 (8-16s):
             </div>
           </div>
 
-          {/* Settings Section */}
           <div className="flex flex-col justify-between">
             <div className="flex flex-col gap-6">
               <div>
@@ -590,21 +613,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-purple-500/30 overflow-x-hidden relative pb-20">
-      {/* Background Decor */}
       <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none mix-blend-screen"></div>
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none mix-blend-screen"></div>
 
-      {/* Header */}
       <header className="pt-12 pb-8 text-center relative z-10 px-4">
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400 mb-4">
-          AI Prompt Generator <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Pro</span>
+          Prompt<span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">Gen</span>
         </h1>
         <p className="text-gray-400 text-lg max-w-2xl mx-auto">
           Reverse-engineer stunning visuals into high-fidelity AI prompts using advanced multi-modal vision analysis.
         </p>
       </header>
 
-      {/* Tabs */}
       <div className="flex justify-center mb-10 relative z-10 px-4">
         <div className="bg-gray-900/80 p-1.5 rounded-full border border-gray-700/50 backdrop-blur-md flex gap-1 shadow-xl">
           <button
@@ -632,7 +652,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content Area */}
       <main className="relative z-10 px-4">
         {activeTab === 'image' ? (
           <ImageToPrompt showToast={showToast} />
@@ -641,7 +660,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Toasts */}
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
