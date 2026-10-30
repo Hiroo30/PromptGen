@@ -647,7 +647,7 @@ export default function App() {
             }`}
           >
             <Video size={18} />
-            Video to Prompt <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">Beta</span>
+            Video to Prompt <span className></span>
           </button>
         </div>
       </div>
