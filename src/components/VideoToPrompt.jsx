@@ -7,7 +7,7 @@ import { parseResponse } from '../lib/parse';
 import { buildSystemInstruction } from '../lib/prompts';
 import ResultViewer from './ResultViewer';
 
-export default function VideoToPrompt({ showToast, apiReady }) {
+export default function VideoToPrompt({ showToast, apiReady, onResultCreated }) {
   const [file, setFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -87,7 +87,15 @@ export default function VideoToPrompt({ showToast, apiReady }) {
       ]);
 
       const rawText = await generateWithGemini(prompt, imageParts, controller.signal);
-      setResults(parseResponse(rawText));
+      const nextResults = parseResponse(rawText);
+      setResults(nextResults);
+      await onResultCreated?.({
+        source: 'video',
+        aspectRatio,
+        customInstruction,
+        media: [file],
+        ...nextResults,
+      });
       showToast('Brief ready.', 'success');
     } catch (err) {
       if (err?.name === 'AbortError') return;

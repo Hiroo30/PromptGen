@@ -12,7 +12,7 @@ const ASPECT_RATIOS = [
   { id: 'Keduanya', label: 'Both' },
 ];
 
-export default function ImageToPrompt({ showToast, apiReady }) {
+export default function ImageToPrompt({ showToast, apiReady, onResultCreated }) {
   const [files, setFiles] = useState([]);
   const [previews, setPreviews] = useState([]);
   const [aspectRatio, setAspectRatio] = useState('PC');
@@ -105,7 +105,15 @@ export default function ImageToPrompt({ showToast, apiReady }) {
         inlineData: { mimeType: files[idx].type, data },
       }));
       const rawText = await generateWithGemini(prompt, imageParts, controller.signal);
-      setResults(parseResponse(rawText));
+      const nextResults = parseResponse(rawText);
+      setResults(nextResults);
+      await onResultCreated?.({
+        source: 'image',
+        aspectRatio,
+        customInstruction,
+        media: files,
+        ...nextResults,
+      });
       showToast('Brief ready.', 'success');
     } catch (err) {
       if (err?.name === 'AbortError') return;

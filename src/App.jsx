@@ -1,17 +1,50 @@
 import { useCallback, useState } from 'react';
-import { Image as ImageIcon, Video } from 'lucide-react';
+import { Clock3, Image as ImageIcon, Video } from 'lucide-react';
 import ImageToPrompt from './components/ImageToPrompt';
+import PromptHistory from './components/PromptHistory';
 import VideoToPrompt from './components/VideoToPrompt';
 import Toast from './components/Toast';
 import { getGeminiConfig } from './lib/gemini';
+import {
+  clearPromptMedia,
+  createHistoryItem,
+  deletePromptMedia,
+  getPromptHistory,
+  savePromptHistory,
+  savePromptMedia,
+} from './lib/history';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('image');
   const [toast, setToast] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState(getPromptHistory);
   const { ready: apiReady } = getGeminiConfig();
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
+  }, []);
+
+  const saveToHistory = useCallback(async ({ media, ...result }) => {
+    const item = createHistoryItem(result);
+    try {
+      await savePromptMedia(item.id, media);
+      setHistory((current) => savePromptHistory([{ ...item, mediaCount: media?.length || 0 }, ...current]));
+    } catch {
+      setHistory((current) => savePromptHistory([item, ...current]));
+      showToast('Prompt tersimpan, tetapi file referensi gagal disimpan karena ruang browser tidak cukup.', 'error');
+    }
+  }, [showToast]);
+
+  const deleteHistoryItem = useCallback(async (id) => {
+    await deletePromptMedia(id).catch(() => undefined);
+    setHistory((current) => savePromptHistory(current.filter((item) => item.id !== id)));
+  }, []);
+
+  const clearHistory = useCallback(async () => {
+    if (!window.confirm('Hapus seluruh riwayat prompt dari browser ini?')) return;
+    await clearPromptMedia().catch(() => undefined);
+    setHistory(savePromptHistory([]));
   }, []);
 
   return (
@@ -69,13 +102,29 @@ export default function App() {
         </div>
       </div>
 
+      <div className="history-trigger-wrap relative z-10 px-4">
+        <button type="button" className="history-trigger" onClick={() => setHistoryOpen(true)}>
+          <Clock3 size={17} /> Riwayat{history.length ? ` (${history.length})` : ''}
+        </button>
+      </div>
+
       <main className="relative z-10 px-4">
         {activeTab === 'image' ? (
-          <ImageToPrompt showToast={showToast} apiReady={apiReady} />
+          <ImageToPrompt showToast={showToast} apiReady={apiReady} onResultCreated={saveToHistory} />
         ) : (
-          <VideoToPrompt showToast={showToast} apiReady={apiReady} />
+          <VideoToPrompt showToast={showToast} apiReady={apiReady} onResultCreated={saveToHistory} />
         )}
       </main>
+
+      {historyOpen && (
+        <PromptHistory
+          items={history}
+          onClose={() => setHistoryOpen(false)}
+          onDelete={deleteHistoryItem}
+          onClear={clearHistory}
+          onCopyError={(message) => showToast(message, 'error')}
+        />
+      )}
 
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
